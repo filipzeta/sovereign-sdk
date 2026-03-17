@@ -4,24 +4,27 @@ sp1_zkvm::entrypoint!(main);
 
 use demo_stf::MultiAddressEvmSolana;
 use sha2::{Digest, Sha256};
-use sov_aggregated_proof_shared::{
-    AggregatedProofWitness, DeferredProofInput, PreviousOuterProofWitness,
-};
+use sov_aggregated_proof_shared::{AggregatedProofWitness, DeferredProofInput};
 use sov_mock_da::MockDaSpec;
 use sov_mock_zkvm::MockZkvm;
 use sov_modules_api::configurable_spec::ConfigurableSpec;
 use sov_modules_api::da::BlockHeaderTrait;
 use sov_modules_api::execution_mode::Zk;
+use sov_modules_api::AggregatedProofPublicData;
+use sov_modules_api::CodeCommitment;
 use sov_modules_api::DaSpec;
 use sov_modules_api::Spec;
 use sov_modules_api::StateTransitionPublicData;
 use sov_modules_api::Storage;
+use sov_rollup_interface::common::SlotNumber;
 use sov_sp1_adapter::SP1;
 
 type S = ConfigurableSpec<MockDaSpec, SP1, MockZkvm, MultiAddressEvmSolana, Zk>;
 
-type StPubData<S: Spec, Da: DaSpec> =
+type StPubData<S, Da> =
     StateTransitionPublicData<<S as Spec>::Address, Da, <<S as Spec>::Storage as Storage>::Root>;
+type AggPubData<S, Da> =
+    AggregatedProofPublicData<<S as Spec>::Address, Da, <<S as Spec>::Storage as Storage>::Root>;
 
 pub fn main() {
     let witness = sp1_zkvm::io::read::<AggregatedProofWitness<MockDaSpec>>();
@@ -29,29 +32,50 @@ pub fn main() {
     let vkey_hash = witness.vkey_hash;
     let prev_outer_proof_witness = witness.prev_outer_proof_witness;
 
-    verify::<S, MockDaSpec>(proof_inputs, vkey_hash);
-
-    if let Some(prev_outer_proof_witness) = prev_outer_proof_witness {
+    let previous_public_data = if let Some(prev_outer_proof_witness) = prev_outer_proof_witness {
         verify_sp1_proof(
             &prev_outer_proof_witness.public_values,
             prev_outer_proof_witness.vkey_hash,
         );
-    }
+
+        Some(deserialize_agg_pub_data::<S, MockDaSpec>(
+            &prev_outer_proof_witness.public_values,
+        ))
+    } else {
+        None
+    };
+
+    let aggregated_public_data = verify(proof_inputs, vkey_hash, previous_public_data.as_ref());
+
+    sp1_zkvm::io::commit(&aggregated_public_data);
 }
 
-fn verify<S: Spec, Da: DaSpec>(proof_inputs: Vec<DeferredProofInput<Da>>, vkey_hash: [u32; 8]) {
+fn verify(
+    proof_inputs: Vec<DeferredProofInput<MockDaSpec>>,
+    vkey_hash: [u32; 8],
+    previous_public_data: Option<&AggPubData<S, MockDaSpec>>,
+) -> AggPubData<S, MockDaSpec> {
     assert!(
         !proof_inputs.is_empty(),
         "Aggregated proof must contain at least one proof input"
     );
 
-    // `None` means no predecessor to check against (first iteration).
-    let mut expected_prev_hash = None;
-    let mut expected_state_root = None;
+    let mut expected_prev_hash =
+        previous_public_data.map(|public_data| public_data.final_slot_hash.clone());
+    let mut expected_state_root =
+        previous_public_data.map(|public_data| public_data.final_state_root.clone());
+    let mut initial_slot_hash = None;
+    let mut final_slot_hash = None;
+    let mut initial_state_root = None;
+    let mut final_state_root = None;
+    let mut initial_slot_number = None;
+    let mut final_slot_number = None;
+    let mut rewarded_addresses = Vec::with_capacity(proof_inputs.len());
 
     for (index, proof_input) in proof_inputs.iter().enumerate() {
         let stf_public_data =
-            deserialize_pub_data::<S, Da>(proof_input.public_values.as_slice(), index);
+            deserialize_pub_data::<S, MockDaSpec>(&proof_input.public_values, index);
+        let current_slot_number = SlotNumber::new(proof_input.da_block_header.height());
 
         // Check that DA blocks form a chain.
         {
@@ -88,6 +112,42 @@ fn verify<S: Spec, Da: DaSpec>(proof_inputs: Vec<DeferredProofInput<Da>>, vkey_h
 
             expected_state_root = Some(stf_public_data.final_state_root.clone());
         }
+
+        if initial_slot_hash.is_none() {
+            initial_slot_hash = Some(proof_input.da_block_header.hash());
+            initial_state_root = Some(stf_public_data.initial_state_root.clone());
+            initial_slot_number = Some(current_slot_number);
+        }
+
+        rewarded_addresses.push(stf_public_data.prover_address.clone());
+        final_slot_hash = Some(proof_input.da_block_header.hash());
+        final_state_root = Some(stf_public_data.final_state_root);
+        final_slot_number = Some(current_slot_number);
+    }
+
+    let initial_slot_hash = initial_slot_hash.expect("proof_inputs is non-empty");
+    let final_slot_hash = final_slot_hash.expect("proof_inputs is non-empty");
+    let initial_state_root = initial_state_root.expect("proof_inputs is non-empty");
+    let final_state_root = final_state_root.expect("proof_inputs is non-empty");
+    let initial_slot_number = initial_slot_number.expect("proof_inputs is non-empty");
+    let final_slot_number = final_slot_number.expect("proof_inputs is non-empty");
+    let genesis_state_root = previous_public_data
+        .map(|public_data| public_data.genesis_state_root.clone())
+        .unwrap_or_else(|| initial_state_root.clone());
+    let code_commitment = previous_public_data
+        .map(|public_data| public_data.code_commitment.clone())
+        .unwrap_or_else(CodeCommitment::default);
+
+    AggPubData::<S, MockDaSpec> {
+        initial_slot_number,
+        final_slot_number,
+        genesis_state_root,
+        initial_state_root,
+        final_state_root,
+        initial_slot_hash,
+        final_slot_hash,
+        code_commitment,
+        rewarded_addresses,
     }
 }
 
@@ -100,4 +160,9 @@ fn deserialize_pub_data<S: Spec, Da: DaSpec>(data: &[u8], index: usize) -> StPub
     bincode::deserialize(data).unwrap_or_else(|error| {
         panic!("Failed to deserialize public values from proof input {index}: {error}")
     })
+}
+
+fn deserialize_agg_pub_data<S: Spec, Da: DaSpec>(data: &[u8]) -> AggPubData<S, Da> {
+    bincode::deserialize(data)
+        .unwrap_or_else(|error| panic!("Failed to deserialize aggregated public data: {error}"))
 }

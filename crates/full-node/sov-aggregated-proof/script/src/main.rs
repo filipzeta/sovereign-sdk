@@ -4,12 +4,18 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{bail, ensure, Context};
+use demo_stf::MultiAddressEvmSolana;
 use slop_algebra::PrimeField32;
 use sov_aggregated_proof_shared::{
     AggregatedProofWitness, DeferredProofInput, PreviousOuterProofWitness,
 };
 use sov_mock_da::MockDaSpec;
+use sov_mock_zkvm::MockZkvm;
+use sov_modules_api::configurable_spec::ConfigurableSpec;
+use sov_modules_api::execution_mode::Zk;
+use sov_modules_api::{AggregatedProofPublicData, Spec, Storage};
 use sov_sp1_adapter::BlockHeaderWithProof;
+use sov_sp1_adapter::SP1;
 use sp1_recursion_executor::RecursionPublicValues;
 use sp1_sdk::blocking::{ProveRequest, Prover, ProverClient};
 use sp1_sdk::prelude::{include_elf, Elf, HashableKey, SP1Stdin};
@@ -17,6 +23,14 @@ use sp1_sdk::{ProvingKey, SP1Proof, SP1ProofWithPublicValues, SP1VerifyingKey};
 
 const AGGREGATION_ELF: Elf = include_elf!("sov-aggregated-proof-program");
 const JUMP: usize = 3;
+
+type S = ConfigurableSpec<MockDaSpec, SP1, MockZkvm, MultiAddressEvmSolana, Zk>;
+
+type AggPubData = AggregatedProofPublicData<
+    <S as Spec>::Address,
+    MockDaSpec,
+    <<S as Spec>::Storage as Storage>::Root,
+>;
 
 fn main() -> anyhow::Result<()> {
     let start = Instant::now();
@@ -160,6 +174,17 @@ fn create_agg_proof<P: Prover>(
         .verify(&outer_proof, aggregation_pk.verifying_key(), None)
         .context("Failed to verify the outer SP1 aggregation proof")?;
 
+    let public_data = deserialize_agg_pub_data(outer_proof.public_values.as_slice())
+        .context("Outer proof did not emit AggregatedProofPublicData")?;
+
+    println!(
+        "[host] outer proof emits slots {}..={} with hashes {} -> {}",
+        public_data.initial_slot_number,
+        public_data.final_slot_number,
+        public_data.initial_slot_hash,
+        public_data.final_slot_hash
+    );
+
     Ok(outer_proof)
 }
 
@@ -221,4 +246,8 @@ fn read_saved_proof(file_path: &Path) -> anyhow::Result<BlockHeaderWithProof<Moc
         })?;
 
     Ok(block_header_with_proof)
+}
+
+fn deserialize_agg_pub_data(data: &[u8]) -> anyhow::Result<AggPubData> {
+    bincode::deserialize(data).context("Failed to deserialize aggregated proof public data")
 }
