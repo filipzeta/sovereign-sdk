@@ -103,8 +103,26 @@ fn create_agg_proof<P: Prover>(
     );
 
     let aggregation_vk_hash = aggregation_pk.verifying_key().hash_u32();
-
     let mut stdin = SP1Stdin::new();
+
+    let prev_outer_proof_witness = if let Some(previous_outer_proof) = previous_outer_proof {
+        let SP1Proof::Compressed(recursion_proof) = &previous_outer_proof.proof else {
+            bail!("Expected the previous outer proof to be a compressed SP1 proof");
+        };
+
+        stdin.write_proof(
+            *recursion_proof.clone(),
+            aggregation_pk.verifying_key().vk.clone(),
+        );
+
+        Some(PreviousOuterProofWitness {
+            public_values: previous_outer_proof.public_values.to_vec(),
+            vkey_hash: aggregation_vk_hash,
+        })
+    } else {
+        None
+    };
+
     let mut proof_inputs = Vec::with_capacity(raw_proofs.len());
 
     for (index, block_header_with_proof) in raw_proofs.into_iter().enumerate() {
@@ -135,24 +153,6 @@ fn create_agg_proof<P: Prover>(
         proof_inputs.push(deferred_proof_input);
         stdin.write_proof(*recursion_proof.clone(), verification_key.vk.clone());
     }
-
-    let prev_outer_proof_witness = if let Some(previous_outer_proof) = previous_outer_proof {
-        let SP1Proof::Compressed(recursion_proof) = &previous_outer_proof.proof else {
-            bail!("Expected the previous outer proof to be a compressed SP1 proof");
-        };
-
-        stdin.write_proof(
-            *recursion_proof.clone(),
-            aggregation_pk.verifying_key().vk.clone(),
-        );
-
-        Some(PreviousOuterProofWitness {
-            public_values: previous_outer_proof.public_values.to_vec(),
-            vkey_hash: aggregation_vk_hash,
-        })
-    } else {
-        None
-    };
 
     let witness = AggregatedProofWitness {
         proof_inputs,
