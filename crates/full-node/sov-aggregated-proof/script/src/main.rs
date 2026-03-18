@@ -198,7 +198,7 @@ fn create_agg_proof<P: Prover>(
 
     let witness = AggregatedProofWitness {
         proof_inputs,
-        vkey_hash: inner_vk_hash,
+        inner_vkey_hash: inner_vk_hash,
         prev_outer_proof_witness,
     };
 

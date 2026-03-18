@@ -52,7 +52,7 @@ pub fn main() {
 
 fn run_aggregation_program<S: Spec<Da = Da>, Da: DaSpec>(witness: AggregatedProofWitness<Da>) {
     let proof_inputs = witness.proof_inputs;
-    let vkey_hash = witness.vkey_hash;
+    let inner_vkey_hash = witness.inner_vkey_hash;
     let prev_outer_proof_witness = witness.prev_outer_proof_witness;
 
     let previous_public_data = if let Some(prev_outer_proof_witness) = prev_outer_proof_witness {
@@ -65,7 +65,7 @@ fn run_aggregation_program<S: Spec<Da = Da>, Da: DaSpec>(witness: AggregatedProo
     };
 
     let verified_proof_data: VerifyResult<S, Da> =
-        verify_proof_chain::<S, Da>(proof_inputs, vkey_hash, previous_public_data.as_ref());
+        verify_proof_chain::<S, Da>(proof_inputs, inner_vkey_hash, previous_public_data.as_ref());
 
     let VerifiedProofData {
         initial_boundary,
@@ -78,7 +78,7 @@ fn run_aggregation_program<S: Spec<Da = Da>, Da: DaSpec>(witness: AggregatedProo
         .map(|public_data| public_data.genesis_state_root.clone())
         .unwrap_or_else(|| initial_boundary.state_root.clone());
 
-    let code_commitment = code_commitment_from_vkey_hash(vkey_hash);
+    let code_commitment = code_commitment_from_vkey_hash(inner_vkey_hash);
 
     let aggregated_public_data = AggPubData::<S, Da> {
         initial_slot_number: initial_boundary.slot_number,
