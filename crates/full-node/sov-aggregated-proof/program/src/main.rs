@@ -19,6 +19,8 @@ use sov_modules_api::Storage;
 use sov_rollup_interface::common::SlotNumber;
 use sov_sp1_adapter::SP1;
 
+include!(concat!(env!("OUT_DIR"), "/inner_vk_hash.rs"));
+
 type ProgramSpec = ConfigurableSpec<MockDaSpec, SP1, MockZkvm, MultiAddressEvmSolana, Zk>;
 
 type StPubData<S, Da> =
@@ -51,9 +53,7 @@ pub fn main() {
 }
 
 fn run_aggregation_program<S: Spec<Da = Da>, Da: DaSpec>(witness: AggregatedProofWitness<Da>) {
-    let inner_vkey_hash = witness.inner_vkey_hash;
     let proof_inputs = witness.proof_inputs;
-
     let outer_vkey_hash = witness.outer_vkey_hash;
     let prev_outer_proof_witness = witness.prev_outer_proof_witness;
 
@@ -67,7 +67,7 @@ fn run_aggregation_program<S: Spec<Da = Da>, Da: DaSpec>(witness: AggregatedProo
     };
 
     let verified_proof_data: VerifyResult<S, Da> =
-        verify_proof_chain::<S, Da>(proof_inputs, inner_vkey_hash, previous_public_data.as_ref());
+        verify_proof_chain::<S, Da>(proof_inputs, INNER_VKEY_HASH, previous_public_data.as_ref());
 
     let VerifiedProofData {
         initial_boundary,

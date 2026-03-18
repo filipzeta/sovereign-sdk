@@ -57,7 +57,6 @@ fn main() -> anyhow::Result<()> {
     );
 
     let verification_key = saved_inner_vk()?;
-    let inner_vk_hash = verification_key.hash_u32();
     let prover = ProverClient::builder().cpu().build();
 
     let aggregation_pk = prover.setup(AGGREGATION_ELF).map_err(|error| {
@@ -92,7 +91,6 @@ fn main() -> anyhow::Result<()> {
             &prover,
             &aggregation_pk,
             &verification_key,
-            inner_vk_hash,
             proof_batch,
             previous_outer_proof.take(),
         )?;
@@ -135,7 +133,6 @@ fn create_agg_proof<P: Prover>(
     prover: &P,
     aggregation_pk: &P::ProvingKey,
     verification_key: &SP1VerifyingKey,
-    inner_vk_hash: [u32; 8],
     raw_proofs: Vec<BlockHeaderWithProof<MockDaSpec>>,
     previous_outer_proof: Option<SP1ProofWithPublicValues>,
 ) -> anyhow::Result<SP1ProofWithPublicValues> {
@@ -145,6 +142,7 @@ fn create_agg_proof<P: Prover>(
     );
 
     let aggregation_vk_hash = aggregation_pk.verifying_key().hash_u32();
+    let inner_vk_hash = verification_key.hash_u32();
     let mut stdin = SP1Stdin::new();
 
     let prev_outer_proof_witness = if let Some(previous_outer_proof) = previous_outer_proof {
@@ -197,7 +195,6 @@ fn create_agg_proof<P: Prover>(
 
     let witness = AggregatedProofWitness {
         proof_inputs,
-        inner_vkey_hash: inner_vk_hash,
         outer_vkey_hash: aggregation_vk_hash,
         prev_outer_proof_witness,
     };
