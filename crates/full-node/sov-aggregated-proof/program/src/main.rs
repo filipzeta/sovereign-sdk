@@ -33,6 +33,15 @@ struct BoundaryData<Hash, Root> {
     slot_number: SlotNumber,
 }
 
+struct VerifiedProofData<Address, Hash, Root> {
+    initial_boundary: BoundaryData<Hash, Root>,
+    final_boundary: BoundaryData<Hash, Root>,
+    rewarded_addresses: Vec<Address>,
+}
+
+type VerifyResult<S, Da> =
+    VerifiedProofData<<S as Spec>::Address, <Da as DaSpec>::SlotHash, <<S as Spec>::Storage as Storage>::Root>;
+
 pub fn main() {
     let witness = sp1_zkvm::io::read::<AggregatedProofWitness<MockDaSpec>>();
     let proof_inputs = witness.proof_inputs;
@@ -50,8 +59,36 @@ pub fn main() {
         None
     };
 
-    let aggregated_public_data =
+    let verified_proof_data: VerifyResult<S, MockDaSpec> =
         verify::<S, MockDaSpec>(proof_inputs, vkey_hash, previous_public_data.as_ref());
+
+    let VerifiedProofData {
+        initial_boundary,
+        final_boundary,
+        rewarded_addresses,
+    } = verified_proof_data;
+
+    let genesis_state_root = previous_public_data
+        .as_ref()
+        .map(|public_data| public_data.genesis_state_root.clone())
+        .unwrap_or_else(|| initial_boundary.state_root.clone());
+
+    let code_commitment = previous_public_data
+        .as_ref()
+        .map(|public_data| public_data.code_commitment.clone())
+        .unwrap_or_else(CodeCommitment::default);
+
+    let aggregated_public_data = AggPubData::<S, MockDaSpec> {
+        initial_slot_number: initial_boundary.slot_number,
+        final_slot_number: final_boundary.slot_number,
+        genesis_state_root,
+        initial_state_root: initial_boundary.state_root,
+        final_state_root: final_boundary.state_root,
+        initial_slot_hash: initial_boundary.slot_hash,
+        final_slot_hash: final_boundary.slot_hash,
+        code_commitment,
+        rewarded_addresses,
+    };
 
     sp1_zkvm::io::commit(&aggregated_public_data);
 }
@@ -60,7 +97,7 @@ fn verify<S: Spec, Da: DaSpec>(
     proof_inputs: Vec<DeferredProofInput<Da>>,
     vkey_hash: [u32; 8],
     previous_agg_proof_public_data: Option<&AggPubData<S, Da>>,
-) -> AggPubData<S, Da> {
+) -> VerifyResult<S, Da> {
     assert!(
         !proof_inputs.is_empty(),
         "Aggregated proof must contain at least one proof input"
@@ -122,7 +159,7 @@ fn verify<S: Spec, Da: DaSpec>(
             initial_boundary = Some(BoundaryData {
                 slot_hash: proof_input.da_block_header.hash(),
                 state_root: stf_public_data.initial_state_root.clone(),
-                slot_number: current_slot_number,
+                slot_number: current_slot_number.clone(),
             });
         }
 
@@ -146,23 +183,17 @@ fn verify<S: Spec, Da: DaSpec>(
         slot_number: final_slot_number,
     } = final_boundary.expect("proof_inputs is non-empty");
 
-    let genesis_state_root = previous_agg_proof_public_data
-        .map(|public_data| public_data.genesis_state_root.clone())
-        .unwrap_or_else(|| initial_state_root.clone());
-
-    let code_commitment = previous_agg_proof_public_data
-        .map(|public_data| public_data.code_commitment.clone())
-        .unwrap_or_else(CodeCommitment::default);
-
-    AggPubData::<S, Da> {
-        initial_slot_number,
-        final_slot_number,
-        genesis_state_root,
-        initial_state_root,
-        final_state_root,
-        initial_slot_hash,
-        final_slot_hash,
-        code_commitment,
+    VerifyResult::<S, Da> {
+        initial_boundary: BoundaryData {
+            slot_hash: initial_slot_hash,
+            state_root: initial_state_root,
+            slot_number: initial_slot_number,
+        },
+        final_boundary: BoundaryData {
+            slot_hash: final_slot_hash,
+            state_root: final_state_root,
+            slot_number: final_slot_number,
+        },
         rewarded_addresses,
     }
 }
