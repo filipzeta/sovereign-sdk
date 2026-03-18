@@ -39,8 +39,11 @@ struct VerifiedProofData<Address, Hash, Root> {
     rewarded_addresses: Vec<Address>,
 }
 
-type VerifyResult<S, Da> =
-    VerifiedProofData<<S as Spec>::Address, <Da as DaSpec>::SlotHash, <<S as Spec>::Storage as Storage>::Root>;
+type VerifyResult<S, Da> = VerifiedProofData<
+    <S as Spec>::Address,
+    <Da as DaSpec>::SlotHash,
+    <<S as Spec>::Storage as Storage>::Root,
+>;
 
 pub fn main() {
     let witness = sp1_zkvm::io::read::<AggregatedProofWitness<MockDaSpec>>();
@@ -103,10 +106,10 @@ fn verify<S: Spec, Da: DaSpec>(
         "Aggregated proof must contain at least one proof input"
     );
 
-    let mut expected_prev_hash =
+    let mut expected_prev_slot_hash =
         previous_agg_proof_public_data.map(|public_data| public_data.final_slot_hash.clone());
 
-    let mut expected_state_root =
+    let mut expected_prev_state_root =
         previous_agg_proof_public_data.map(|public_data| public_data.final_state_root.clone());
 
     let mut initial_boundary = None;
@@ -127,9 +130,9 @@ fn verify<S: Spec, Da: DaSpec>(
             let da_block_header = &proof_input.da_block_header;
             let current_block_hash = da_block_header.hash();
 
-            if let Some(expected_prev_hash) = &expected_prev_hash {
+            if let Some(expected_prev_slot_hash) = &expected_prev_slot_hash {
                 assert_eq!(
-                    expected_prev_hash,
+                    expected_prev_slot_hash,
                     &da_block_header.prev_hash(),
                     "DA block chain broken at index {index}: prev_hash mismatch"
                 );
@@ -140,19 +143,19 @@ fn verify<S: Spec, Da: DaSpec>(
                 current_block_hash, stf_public_data.slot_hash,
                 "Slot hash mismatch at index {index}: DA block header hash doesn't match public data"
             );
-            expected_prev_hash = Some(current_block_hash);
+            expected_prev_slot_hash = Some(current_block_hash);
         }
 
         // Check that state roots are sequentially related by the state transition.
         {
-            if let Some(expected_state_root) = &expected_state_root {
+            if let Some(expected_prev_state_root) = &expected_prev_state_root {
                 assert_eq!(
-                    expected_state_root, &stf_public_data.initial_state_root,
+                    expected_prev_state_root, &stf_public_data.initial_state_root,
                     "State root discontinuity at index {index}: previous final_state_root != current initial_state_root"
                 );
             }
 
-            expected_state_root = Some(stf_public_data.final_state_root.clone());
+            expected_prev_state_root = Some(stf_public_data.final_state_root.clone());
         }
 
         if initial_boundary.is_none() {
@@ -171,29 +174,12 @@ fn verify<S: Spec, Da: DaSpec>(
         });
     }
 
-    let BoundaryData {
-        slot_hash: initial_slot_hash,
-        state_root: initial_state_root,
-        slot_number: initial_slot_number,
-    } = initial_boundary.expect("proof_inputs is non-empty");
-
-    let BoundaryData {
-        slot_hash: final_slot_hash,
-        state_root: final_state_root,
-        slot_number: final_slot_number,
-    } = final_boundary.expect("proof_inputs is non-empty");
+    let initial_boundary = initial_boundary.expect("proof_inputs is non-empty");
+    let final_boundary = final_boundary.expect("proof_inputs is non-empty");
 
     VerifyResult::<S, Da> {
-        initial_boundary: BoundaryData {
-            slot_hash: initial_slot_hash,
-            state_root: initial_state_root,
-            slot_number: initial_slot_number,
-        },
-        final_boundary: BoundaryData {
-            slot_hash: final_slot_hash,
-            state_root: final_state_root,
-            slot_number: final_slot_number,
-        },
+        initial_boundary,
+        final_boundary,
         rewarded_addresses,
     }
 }
