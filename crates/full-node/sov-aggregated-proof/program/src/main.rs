@@ -19,7 +19,7 @@ use sov_modules_api::Storage;
 use sov_rollup_interface::common::SlotNumber;
 use sov_sp1_adapter::SP1;
 
-type S = ConfigurableSpec<MockDaSpec, SP1, MockZkvm, MultiAddressEvmSolana, Zk>;
+type ProgramSpec = ConfigurableSpec<MockDaSpec, SP1, MockZkvm, MultiAddressEvmSolana, Zk>;
 
 type StPubData<S, Da> =
     StateTransitionPublicData<<S as Spec>::Address, Da, <<S as Spec>::Storage as Storage>::Root>;
@@ -47,13 +47,17 @@ type VerifyResult<S, Da> = VerifiedProofData<
 
 pub fn main() {
     let witness = sp1_zkvm::io::read::<AggregatedProofWitness<MockDaSpec>>();
+    run_aggregation_program::<ProgramSpec, MockDaSpec>(witness);
+}
+
+fn run_aggregation_program<S: Spec<Da = Da>, Da: DaSpec>(witness: AggregatedProofWitness<Da>) {
     let proof_inputs = witness.proof_inputs;
     let vkey_hash = witness.vkey_hash;
     let prev_outer_proof_witness = witness.prev_outer_proof_witness;
 
     let previous_public_data = if let Some(prev_outer_proof_witness) = prev_outer_proof_witness {
         Some(
-            deserialize_and_verify_pub_data::<AggPubData<S, MockDaSpec>>(
+            deserialize_and_verify_pub_data::<AggPubData<S, Da>>(
                 &prev_outer_proof_witness.public_values,
                 prev_outer_proof_witness.vkey_hash,
             ),
@@ -62,8 +66,8 @@ pub fn main() {
         None
     };
 
-    let verified_proof_data: VerifyResult<S, MockDaSpec> =
-        verify::<S, MockDaSpec>(proof_inputs, vkey_hash, previous_public_data.as_ref());
+    let verified_proof_data: VerifyResult<S, Da> =
+        verify::<S, Da>(proof_inputs, vkey_hash, previous_public_data.as_ref());
 
     let VerifiedProofData {
         initial_boundary,
@@ -81,7 +85,7 @@ pub fn main() {
         .map(|public_data| public_data.code_commitment.clone())
         .unwrap_or_else(CodeCommitment::default);
 
-    let aggregated_public_data = AggPubData::<S, MockDaSpec> {
+    let aggregated_public_data = AggPubData::<S, Da> {
         initial_slot_number: initial_boundary.slot_number,
         final_slot_number: final_boundary.slot_number,
         genesis_state_root,
