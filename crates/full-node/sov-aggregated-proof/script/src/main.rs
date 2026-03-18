@@ -13,7 +13,7 @@ use sov_mock_da::MockDaSpec;
 use sov_mock_zkvm::MockZkvm;
 use sov_modules_api::configurable_spec::ConfigurableSpec;
 use sov_modules_api::execution_mode::Zk;
-use sov_modules_api::{AggregatedProofPublicData, Spec, Storage};
+use sov_modules_api::{AggregatedProofPublicData, Spec, StateTransitionPublicData, Storage};
 use sov_sp1_adapter::BlockHeaderWithProof;
 use sov_sp1_adapter::SP1;
 use sp1_recursion_executor::RecursionPublicValues;
@@ -27,6 +27,12 @@ const JUMP: usize = 3;
 type S = ConfigurableSpec<MockDaSpec, SP1, MockZkvm, MultiAddressEvmSolana, Zk>;
 
 type AggPubData = AggregatedProofPublicData<
+    <S as Spec>::Address,
+    MockDaSpec,
+    <<S as Spec>::Storage as Storage>::Root,
+>;
+
+type StfPubData = StateTransitionPublicData<
     <S as Spec>::Address,
     MockDaSpec,
     <<S as Spec>::Storage as Storage>::Root,
@@ -64,7 +70,7 @@ fn main() -> anyhow::Result<()> {
         .collect::<Vec<_>>();
     let num_outer_proofs = proof_batches.len();
 
-    let mut previous_outer_proof = None;
+    let mut previous_outer_proof: Option<SP1ProofWithPublicValues> = None;
 
     for (batch_index, proof_batch) in proof_batches.into_iter().enumerate() {
         println!(
@@ -74,14 +80,53 @@ fn main() -> anyhow::Result<()> {
             proof_batch.len()
         );
 
-        previous_outer_proof = Some(create_agg_proof(
+        let previous_outer_public_data = previous_outer_proof
+            .as_ref()
+            .map(|proof| deserialize_agg_pub_data(proof.public_values.as_slice()))
+            .transpose()
+            .context("Previous outer proof did not emit AggregatedProofPublicData")?;
+
+        let (expected_initial_state_root, expected_final_state_root) =
+            batch_state_roots(&proof_batch)
+                .context("Failed to derive expected state roots from the current proof batch")?;
+
+        let outer_proof = create_agg_proof(
             &prover,
             &aggregation_pk,
             &verification_key,
             inner_vk_hash,
             proof_batch,
-            previous_outer_proof,
-        )?);
+            previous_outer_proof.take(),
+        )?;
+
+        let public_data = deserialize_agg_pub_data(outer_proof.public_values.as_slice())
+            .context("Outer proof did not emit AggregatedProofPublicData")?;
+
+        ensure!(
+            public_data.initial_state_root == expected_initial_state_root,
+            "Outer proof {} initial_state_root does not match the first inner proof initial_state_root",
+            batch_index + 1
+        );
+        ensure!(
+            public_data.final_state_root == expected_final_state_root,
+            "Outer proof {} final_state_root does not match the last inner proof final_state_root",
+            batch_index + 1
+        );
+
+        if let Some(previous_outer_public_data) = previous_outer_public_data.as_ref() {
+            ensure!(
+                public_data.genesis_state_root == previous_outer_public_data.genesis_state_root,
+                "Outer proof {} genesis_state_root changed across recursive aggregation",
+                batch_index + 1
+            );
+            ensure!(
+                public_data.initial_state_root == previous_outer_public_data.final_state_root,
+                "Outer proof {} initial_state_root does not continue the previous outer proof final_state_root",
+                batch_index + 1
+            );
+        }
+
+        previous_outer_proof = Some(outer_proof);
     }
 
     println!("[host] verified outer proof(s) in {:?}", start.elapsed());
@@ -250,4 +295,40 @@ fn read_saved_proof(file_path: &Path) -> anyhow::Result<BlockHeaderWithProof<Moc
 
 fn deserialize_agg_pub_data(data: &[u8]) -> anyhow::Result<AggPubData> {
     bincode::deserialize(data).context("Failed to deserialize aggregated proof public data")
+}
+
+fn deserialize_stf_pub_data(data: &[u8]) -> anyhow::Result<StfPubData> {
+    bincode::deserialize(data).context("Failed to deserialize state transition public data")
+}
+
+fn batch_state_roots(
+    proof_batch: &[BlockHeaderWithProof<MockDaSpec>],
+) -> anyhow::Result<(
+    <<S as Spec>::Storage as Storage>::Root,
+    <<S as Spec>::Storage as Storage>::Root,
+)> {
+    let first_proof = proof_batch
+        .first()
+        .expect("proof batches are guaranteed to be non-empty");
+    let last_proof = proof_batch
+        .last()
+        .expect("proof batches are guaranteed to be non-empty");
+
+    let first_public_data = deserialize_stf_pub_data(
+        sov_sp1_adapter::decode_sp1_proof(&first_proof.proof)?
+            .public_values
+            .as_slice(),
+    )
+    .context("First inner proof did not emit StateTransitionPublicData")?;
+    let last_public_data = deserialize_stf_pub_data(
+        sov_sp1_adapter::decode_sp1_proof(&last_proof.proof)?
+            .public_values
+            .as_slice(),
+    )
+    .context("Last inner proof did not emit StateTransitionPublicData")?;
+
+    Ok((
+        first_public_data.initial_state_root,
+        last_public_data.final_state_root,
+    ))
 }
