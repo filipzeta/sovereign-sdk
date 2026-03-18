@@ -67,7 +67,7 @@ fn run_aggregation_program<S: Spec<Da = Da>, Da: DaSpec>(witness: AggregatedProo
     };
 
     let verified_proof_data: VerifyResult<S, Da> =
-        verify::<S, Da>(proof_inputs, vkey_hash, previous_public_data.as_ref());
+        verify_proof_chain::<S, Da>(proof_inputs, vkey_hash, previous_public_data.as_ref());
 
     let VerifiedProofData {
         initial_boundary,
@@ -100,7 +100,7 @@ fn run_aggregation_program<S: Spec<Da = Da>, Da: DaSpec>(witness: AggregatedProo
     sp1_zkvm::io::commit(&aggregated_public_data);
 }
 
-fn verify<S: Spec, Da: DaSpec>(
+fn verify_proof_chain<S: Spec, Da: DaSpec>(
     proof_inputs: Vec<DeferredProofInput<Da>>,
     vkey_hash: [u32; 8],
     previous_agg_proof_public_data: Option<&AggPubData<S, Da>>,
