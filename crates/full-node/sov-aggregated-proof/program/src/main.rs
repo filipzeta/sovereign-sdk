@@ -34,7 +34,7 @@ pub fn main() {
     let prev_outer_proof_witness = witness.prev_outer_proof_witness;
 
     let previous_public_data = if let Some(prev_outer_proof_witness) = prev_outer_proof_witness {
-        Some(deserialize_and_verify_pub_data(
+        Some(deserialize_and_verify_pub_data::<AggPubData<S, MockDaSpec>>(
             &prev_outer_proof_witness.public_values,
             prev_outer_proof_witness.vkey_hash,
         ))
@@ -42,16 +42,17 @@ pub fn main() {
         None
     };
 
-    let aggregated_public_data = verify(proof_inputs, vkey_hash, previous_public_data.as_ref());
+    let aggregated_public_data =
+        verify::<S, MockDaSpec>(proof_inputs, vkey_hash, previous_public_data.as_ref());
 
     sp1_zkvm::io::commit(&aggregated_public_data);
 }
 
-fn verify(
-    proof_inputs: Vec<DeferredProofInput<MockDaSpec>>,
+fn verify<S: Spec, Da: DaSpec>(
+    proof_inputs: Vec<DeferredProofInput<Da>>,
     vkey_hash: [u32; 8],
-    previous_public_data: Option<&AggPubData<S, MockDaSpec>>,
-) -> AggPubData<S, MockDaSpec> {
+    previous_public_data: Option<&AggPubData<S, Da>>,
+) -> AggPubData<S, Da> {
     assert!(
         !proof_inputs.is_empty(),
         "Aggregated proof must contain at least one proof input"
@@ -70,7 +71,7 @@ fn verify(
     let mut rewarded_addresses = Vec::with_capacity(proof_inputs.len());
 
     for (index, proof_input) in proof_inputs.iter().enumerate() {
-        let stf_public_data = deserialize_and_verify_pub_data::<StPubData<S, MockDaSpec>>(
+        let stf_public_data = deserialize_and_verify_pub_data::<StPubData<S, Da>>(
             &proof_input.public_values,
             vkey_hash,
         );
@@ -135,7 +136,7 @@ fn verify(
         .map(|public_data| public_data.code_commitment.clone())
         .unwrap_or_else(CodeCommitment::default);
 
-    AggPubData::<S, MockDaSpec> {
+    AggPubData::<S, Da> {
         initial_slot_number,
         final_slot_number,
         genesis_state_root,
