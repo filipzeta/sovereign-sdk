@@ -27,6 +27,12 @@ type StPubData<S, Da> =
 type AggPubData<S, Da> =
     AggregatedProofPublicData<<S as Spec>::Address, Da, <<S as Spec>::Storage as Storage>::Root>;
 
+struct BoundaryData<Hash, Root> {
+    slot_hash: Hash,
+    state_root: Root,
+    slot_number: SlotNumber,
+}
+
 pub fn main() {
     let witness = sp1_zkvm::io::read::<AggregatedProofWitness<MockDaSpec>>();
     let proof_inputs = witness.proof_inputs;
@@ -34,10 +40,12 @@ pub fn main() {
     let prev_outer_proof_witness = witness.prev_outer_proof_witness;
 
     let previous_public_data = if let Some(prev_outer_proof_witness) = prev_outer_proof_witness {
-        Some(deserialize_and_verify_pub_data::<AggPubData<S, MockDaSpec>>(
-            &prev_outer_proof_witness.public_values,
-            prev_outer_proof_witness.vkey_hash,
-        ))
+        Some(
+            deserialize_and_verify_pub_data::<AggPubData<S, MockDaSpec>>(
+                &prev_outer_proof_witness.public_values,
+                prev_outer_proof_witness.vkey_hash,
+            ),
+        )
     } else {
         None
     };
@@ -51,7 +59,7 @@ pub fn main() {
 fn verify<S: Spec, Da: DaSpec>(
     proof_inputs: Vec<DeferredProofInput<Da>>,
     vkey_hash: [u32; 8],
-    previous_public_data: Option<&AggPubData<S, Da>>,
+    previous_agg_proof_public_data: Option<&AggPubData<S, Da>>,
 ) -> AggPubData<S, Da> {
     assert!(
         !proof_inputs.is_empty(),
@@ -59,15 +67,14 @@ fn verify<S: Spec, Da: DaSpec>(
     );
 
     let mut expected_prev_hash =
-        previous_public_data.map(|public_data| public_data.final_slot_hash.clone());
+        previous_agg_proof_public_data.map(|public_data| public_data.final_slot_hash.clone());
+
     let mut expected_state_root =
-        previous_public_data.map(|public_data| public_data.final_state_root.clone());
-    let mut initial_slot_hash = None;
-    let mut final_slot_hash = None;
-    let mut initial_state_root = None;
-    let mut final_state_root = None;
-    let mut initial_slot_number = None;
-    let mut final_slot_number = None;
+        previous_agg_proof_public_data.map(|public_data| public_data.final_state_root.clone());
+
+    let mut initial_boundary = None;
+    let mut final_boundary = None;
+
     let mut rewarded_addresses = Vec::with_capacity(proof_inputs.len());
 
     for (index, proof_input) in proof_inputs.iter().enumerate() {
@@ -111,28 +118,39 @@ fn verify<S: Spec, Da: DaSpec>(
             expected_state_root = Some(stf_public_data.final_state_root.clone());
         }
 
-        if initial_slot_hash.is_none() {
-            initial_slot_hash = Some(proof_input.da_block_header.hash());
-            initial_state_root = Some(stf_public_data.initial_state_root.clone());
-            initial_slot_number = Some(current_slot_number);
+        if initial_boundary.is_none() {
+            initial_boundary = Some(BoundaryData {
+                slot_hash: proof_input.da_block_header.hash(),
+                state_root: stf_public_data.initial_state_root.clone(),
+                slot_number: current_slot_number,
+            });
         }
 
         rewarded_addresses.push(stf_public_data.prover_address.clone());
-        final_slot_hash = Some(proof_input.da_block_header.hash());
-        final_state_root = Some(stf_public_data.final_state_root);
-        final_slot_number = Some(current_slot_number);
+        final_boundary = Some(BoundaryData {
+            slot_hash: proof_input.da_block_header.hash(),
+            state_root: stf_public_data.final_state_root,
+            slot_number: current_slot_number,
+        });
     }
 
-    let initial_slot_hash = initial_slot_hash.expect("proof_inputs is non-empty");
-    let final_slot_hash = final_slot_hash.expect("proof_inputs is non-empty");
-    let initial_state_root = initial_state_root.expect("proof_inputs is non-empty");
-    let final_state_root = final_state_root.expect("proof_inputs is non-empty");
-    let initial_slot_number = initial_slot_number.expect("proof_inputs is non-empty");
-    let final_slot_number = final_slot_number.expect("proof_inputs is non-empty");
-    let genesis_state_root = previous_public_data
+    let BoundaryData {
+        slot_hash: initial_slot_hash,
+        state_root: initial_state_root,
+        slot_number: initial_slot_number,
+    } = initial_boundary.expect("proof_inputs is non-empty");
+
+    let BoundaryData {
+        slot_hash: final_slot_hash,
+        state_root: final_state_root,
+        slot_number: final_slot_number,
+    } = final_boundary.expect("proof_inputs is non-empty");
+
+    let genesis_state_root = previous_agg_proof_public_data
         .map(|public_data| public_data.genesis_state_root.clone())
         .unwrap_or_else(|| initial_state_root.clone());
-    let code_commitment = previous_public_data
+
+    let code_commitment = previous_agg_proof_public_data
         .map(|public_data| public_data.code_commitment.clone())
         .unwrap_or_else(CodeCommitment::default);
 
@@ -148,24 +166,6 @@ fn verify<S: Spec, Da: DaSpec>(
         rewarded_addresses,
     }
 }
-
-/*fn
-fn verify_sp1_proof(public_values: &[u8], vkey_hash: [u32; 8]) {
-    let public_values_digest: [u8; 32] = Sha256::digest(public_values).into();
-    sp1_zkvm::lib::verify::verify_sp1_proof(&vkey_hash, &public_values_digest);
-}
-
-fn deserialize_pub_data<S: Spec, Da: DaSpec>(data: &[u8], index: usize) -> StPubData<S, Da> {
-    bincode::deserialize(data).unwrap_or_else(|error| {
-        panic!("Failed to deserialize public values from proof input {index}: {error}")
-    })
-}*/
-
-/*
-fn deserialize_agg_pub_data<S: Spec, Da: DaSpec>(data: &[u8]) -> AggPubData<S, Da> {
-    bincode::deserialize(data)
-        .unwrap_or_else(|error| panic!("Failed to deserialize aggregated public data: {error}"))
-}*/
 
 fn deserialize_and_verify_pub_data<T: serde::de::DeserializeOwned>(
     pub_values: &[u8],
