@@ -6253,6 +6253,7 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "demo-stf",
+ "serde",
  "sha2 0.10.9",
  "sov-aggregated-proof-shared",
  "sov-mock-da",

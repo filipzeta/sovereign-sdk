@@ -23,6 +23,7 @@ type S = ConfigurableSpec<MockDaSpec, SP1, MockZkvm, MultiAddressEvmSolana, Zk>;
 
 type StPubData<S, Da> =
     StateTransitionPublicData<<S as Spec>::Address, Da, <<S as Spec>::Storage as Storage>::Root>;
+
 type AggPubData<S, Da> =
     AggregatedProofPublicData<<S as Spec>::Address, Da, <<S as Spec>::Storage as Storage>::Root>;
 
@@ -33,13 +34,9 @@ pub fn main() {
     let prev_outer_proof_witness = witness.prev_outer_proof_witness;
 
     let previous_public_data = if let Some(prev_outer_proof_witness) = prev_outer_proof_witness {
-        verify_sp1_proof(
+        Some(deserialize_and_verify_pub_data(
             &prev_outer_proof_witness.public_values,
             prev_outer_proof_witness.vkey_hash,
-        );
-
-        Some(deserialize_agg_pub_data::<S, MockDaSpec>(
-            &prev_outer_proof_witness.public_values,
         ))
     } else {
         None
@@ -73,8 +70,11 @@ fn verify(
     let mut rewarded_addresses = Vec::with_capacity(proof_inputs.len());
 
     for (index, proof_input) in proof_inputs.iter().enumerate() {
-        let stf_public_data =
-            deserialize_pub_data::<S, MockDaSpec>(&proof_input.public_values, index);
+        let stf_public_data = deserialize_and_verify_pub_data::<StPubData<S, MockDaSpec>>(
+            &proof_input.public_values,
+            vkey_hash,
+        );
+
         let current_slot_number = SlotNumber::new(proof_input.da_block_header.height());
 
         // Check that DA blocks form a chain.
@@ -106,9 +106,6 @@ fn verify(
                     "State root discontinuity at index {index}: previous final_state_root != current initial_state_root"
                 );
             }
-
-            println!("Verifying {index}");
-            verify_sp1_proof(&proof_input.public_values, vkey_hash);
 
             expected_state_root = Some(stf_public_data.final_state_root.clone());
         }
@@ -151,6 +148,7 @@ fn verify(
     }
 }
 
+/*fn
 fn verify_sp1_proof(public_values: &[u8], vkey_hash: [u32; 8]) {
     let public_values_digest: [u8; 32] = Sha256::digest(public_values).into();
     sp1_zkvm::lib::verify::verify_sp1_proof(&vkey_hash, &public_values_digest);
@@ -160,9 +158,21 @@ fn deserialize_pub_data<S: Spec, Da: DaSpec>(data: &[u8], index: usize) -> StPub
     bincode::deserialize(data).unwrap_or_else(|error| {
         panic!("Failed to deserialize public values from proof input {index}: {error}")
     })
-}
+}*/
 
+/*
 fn deserialize_agg_pub_data<S: Spec, Da: DaSpec>(data: &[u8]) -> AggPubData<S, Da> {
     bincode::deserialize(data)
+        .unwrap_or_else(|error| panic!("Failed to deserialize aggregated public data: {error}"))
+}*/
+
+fn deserialize_and_verify_pub_data<T: serde::de::DeserializeOwned>(
+    pub_values: &[u8],
+    vkey_hash: [u32; 8],
+) -> T {
+    let public_values_digest: [u8; 32] = Sha256::digest(pub_values).into();
+    sp1_zkvm::lib::verify::verify_sp1_proof(&vkey_hash, &public_values_digest);
+
+    bincode::deserialize(pub_values)
         .unwrap_or_else(|error| panic!("Failed to deserialize aggregated public data: {error}"))
 }
