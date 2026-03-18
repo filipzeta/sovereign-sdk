@@ -82,9 +82,7 @@ fn main() -> anyhow::Result<()> {
 
         let previous_outer_public_data = previous_outer_proof
             .as_ref()
-            .map(|proof| deserialize_agg_pub_data(proof.public_values.as_slice()))
-            .transpose()
-            .context("Previous outer proof did not emit AggregatedProofPublicData")?;
+            .map(|proof| deserialize_pub_data::<AggPubData>(proof.public_values.as_slice()));
 
         let (expected_initial_state_root, expected_final_state_root) =
             batch_state_roots(&proof_batch)
@@ -99,8 +97,7 @@ fn main() -> anyhow::Result<()> {
             previous_outer_proof.take(),
         )?;
 
-        let public_data = deserialize_agg_pub_data(outer_proof.public_values.as_slice())
-            .context("Outer proof did not emit AggregatedProofPublicData")?;
+        let public_data: AggPubData = deserialize_pub_data(outer_proof.public_values.as_slice());
 
         ensure!(
             public_data.initial_state_root == expected_initial_state_root,
@@ -219,8 +216,7 @@ fn create_agg_proof<P: Prover>(
         .verify(&outer_proof, aggregation_pk.verifying_key(), None)
         .context("Failed to verify the outer SP1 aggregation proof")?;
 
-    let public_data = deserialize_agg_pub_data(outer_proof.public_values.as_slice())
-        .context("Outer proof did not emit AggregatedProofPublicData")?;
+    let public_data: AggPubData = deserialize_pub_data(outer_proof.public_values.as_slice());
 
     println!(
         "[host] outer proof emits slots {}..={} with hashes {} -> {}",
@@ -293,12 +289,8 @@ fn read_saved_proof(file_path: &Path) -> anyhow::Result<BlockHeaderWithProof<Moc
     Ok(block_header_with_proof)
 }
 
-fn deserialize_agg_pub_data(data: &[u8]) -> anyhow::Result<AggPubData> {
-    bincode::deserialize(data).context("Failed to deserialize aggregated proof public data")
-}
-
-fn deserialize_stf_pub_data(data: &[u8]) -> anyhow::Result<StfPubData> {
-    bincode::deserialize(data).context("Failed to deserialize state transition public data")
+fn deserialize_pub_data<T: serde::de::DeserializeOwned>(data: &[u8]) -> T {
+    bincode::deserialize(data).expect("Failed to deserialize public data")
 }
 
 fn batch_state_roots(
@@ -314,18 +306,16 @@ fn batch_state_roots(
         .last()
         .expect("proof batches are guaranteed to be non-empty");
 
-    let first_public_data = deserialize_stf_pub_data(
+    let first_public_data: StfPubData = deserialize_pub_data(
         sov_sp1_adapter::decode_sp1_proof(&first_proof.proof)?
             .public_values
             .as_slice(),
-    )
-    .context("First inner proof did not emit StateTransitionPublicData")?;
-    let last_public_data = deserialize_stf_pub_data(
+    );
+    let last_public_data: StfPubData = deserialize_pub_data(
         sov_sp1_adapter::decode_sp1_proof(&last_proof.proof)?
             .public_values
             .as_slice(),
-    )
-    .context("Last inner proof did not emit StateTransitionPublicData")?;
+    );
 
     Ok((
         first_public_data.initial_state_root,
