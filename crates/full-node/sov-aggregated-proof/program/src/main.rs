@@ -56,12 +56,10 @@ fn run_aggregation_program<S: Spec<Da = Da>, Da: DaSpec>(witness: AggregatedProo
     let prev_outer_proof_witness = witness.prev_outer_proof_witness;
 
     let previous_public_data = if let Some(prev_outer_proof_witness) = prev_outer_proof_witness {
-        Some(
-            deserialize_and_verify_pub_data::<AggPubData<S, Da>>(
-                &prev_outer_proof_witness.public_values,
-                prev_outer_proof_witness.vkey_hash,
-            ),
-        )
+        Some(deserialize_and_verify_pub_data::<AggPubData<S, Da>>(
+            &prev_outer_proof_witness.public_values,
+            prev_outer_proof_witness.vkey_hash,
+        ))
     } else {
         None
     };
@@ -80,10 +78,7 @@ fn run_aggregation_program<S: Spec<Da = Da>, Da: DaSpec>(witness: AggregatedProo
         .map(|public_data| public_data.genesis_state_root.clone())
         .unwrap_or_else(|| initial_boundary.state_root.clone());
 
-    let code_commitment = previous_public_data
-        .as_ref()
-        .map(|public_data| public_data.code_commitment.clone())
-        .unwrap_or_else(CodeCommitment::default);
+    let code_commitment = code_commitment_from_vkey_hash(vkey_hash);
 
     let aggregated_public_data = AggPubData::<S, Da> {
         initial_slot_number: initial_boundary.slot_number,
@@ -197,4 +192,12 @@ fn deserialize_and_verify_pub_data<T: serde::de::DeserializeOwned>(
 
     bincode::deserialize(pub_values)
         .unwrap_or_else(|error| panic!("Failed to deserialize aggregated public data: {error}"))
+}
+
+fn code_commitment_from_vkey_hash(vkey_hash: [u32; 8]) -> CodeCommitment {
+    let mut bytes = Vec::with_capacity(32);
+    for word in vkey_hash {
+        bytes.extend_from_slice(&word.to_le_bytes());
+    }
+    CodeCommitment(bytes)
 }
