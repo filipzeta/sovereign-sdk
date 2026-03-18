@@ -51,8 +51,9 @@ pub fn main() {
 }
 
 fn run_aggregation_program<S: Spec<Da = Da>, Da: DaSpec>(witness: AggregatedProofWitness<Da>) {
-    let proof_inputs = witness.proof_inputs;
     let inner_vkey_hash = witness.inner_vkey_hash;
+    let proof_inputs = witness.proof_inputs;
+
     let outer_vkey_hash = witness.outer_vkey_hash;
     let prev_outer_proof_witness = witness.prev_outer_proof_witness;
 
