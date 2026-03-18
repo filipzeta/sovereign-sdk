@@ -159,7 +159,6 @@ fn create_agg_proof<P: Prover>(
 
         Some(PreviousOuterProofWitness {
             public_values: previous_outer_proof.public_values.to_vec(),
-            vkey_hash: aggregation_vk_hash,
         })
     } else {
         None
@@ -199,6 +198,7 @@ fn create_agg_proof<P: Prover>(
     let witness = AggregatedProofWitness {
         proof_inputs,
         inner_vkey_hash: inner_vk_hash,
+        outer_vkey_hash: aggregation_vk_hash,
         prev_outer_proof_witness,
     };
 

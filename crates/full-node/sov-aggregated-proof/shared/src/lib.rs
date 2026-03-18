@@ -9,13 +9,13 @@ pub struct DeferredProofInput<Da: DaSpec> {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AggregatedProofWitness<Da: DaSpec> {
-    pub proof_inputs: Vec<DeferredProofInput<Da>>,
     pub inner_vkey_hash: [u32; 8],
+    pub proof_inputs: Vec<DeferredProofInput<Da>>,
+    pub outer_vkey_hash: [u32; 8],
     pub prev_outer_proof_witness: Option<PreviousOuterProofWitness>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PreviousOuterProofWitness {
     pub public_values: Vec<u8>,
-    pub vkey_hash: [u32; 8],
 }
